@@ -5,10 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI GPS Companion Prototype</title>
     
-    <!-- LeafletJS for Maps -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-
     <!-- Font Awesome for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
@@ -101,7 +97,7 @@
 
     <div class="ai-container">
         <div class="ai-response-box">
-            <p id="ai-text">Hello! Where would you like to go today?</p>
+            <p id="ai-text">Hello! Please allow location access, then tell me where you want to go.</p>
         </div>
         <button id="mic-btn" class="mic-button">
             <i class="fa-solid fa-microphone"></i>
@@ -115,64 +111,40 @@
         const micButton = document.getElementById('mic-btn');
         const micLabel = document.getElementById('mic-label');
 
-        // --- State Variables ---
+        // --- State Variables & Google Maps Services ---
         let map;
         let userMarker;
-        let destinationMarker;
-        let routePolyline;
         let isListening = false;
         let userLocation = null;
+        let directionsService;
+        let directionsRenderer;
+        let geocoder;
         
         // Initial location: Cape Town, South Africa
-        const initialCoords = [-33.9249, 18.4241];
+        const initialCoords = { lat: -33.9249, lng: 18.4241 };
 
-        // --- Web Speech API for Voice Recognition ---
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        let recognition;
-        if (SpeechRecognition) {
-            recognition = new SpeechRecognition();
-            recognition.continuous = false; // Stop listening after a single phrase
-            recognition.lang = 'en-US';
-            recognition.interimResults = false;
-            recognition.maxAlternatives = 1;
+        // --- Google Maps Initialization ---
+        function initMapWithLocation(coords) {
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: coords,
+                zoom: 14,
+                mapTypeControl: false,
+                streetViewControl: false,
+            });
 
-            // Fired when a command is successfully recognized
-            recognition.onresult = (event) => {
-                const command = event.results[0][0].transcript;
-                console.log('User said: ', command);
-                processUserCommand(command);
-            };
+            // Initialize Google Maps services
+            directionsService = new google.maps.DirectionsService();
+            directionsRenderer = new google.maps.DirectionsRenderer();
+            geocoder = new google.maps.Geocoder();
+            directionsRenderer.setMap(map); // Link renderer to the map
 
-            // Fired when the user stops talking
-            recognition.onspeechend = () => {
-                recognition.stop();
-                isListening = false;
-                micButton.classList.remove('active');
-                micLabel.textContent = 'Tap to Speak';
-            };
-            
-            // Fired on a recognition error
-            recognition.onerror = (event) => {
-                aiTextElement.textContent = 'Error with voice recognition: ' + event.error;
-                isListening = false;
-                micButton.classList.remove('active');
-                micLabel.textContent = 'Tap to Speak';
-            };
-
-        } else {
-            aiTextElement.textContent = "Sorry, your browser doesn't support voice commands.";
-        }
-
-
-        // --- Map Initialization ---
-        function initializeMap(coords) {
-            map = L.map('map').setView(coords, 13);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            }).addTo(map);
-            
-            userLocation = { lat: coords[0], lng: coords[1] };
-            userMarker = L.marker(coords).addTo(map).bindPopup('You are here.');
+            userLocation = coords;
+            userMarker = new google.maps.Marker({
+                position: coords,
+                map: map,
+                title: "You are here!",
+            });
+            aiTextElement.textContent = "Your location is set. Where would you like to go?";
         }
 
         // --- Location Tracking ---
@@ -180,62 +152,46 @@
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(
                     (position) => {
-                        const coords = [position.coords.latitude, position.coords.longitude];
-                        initializeMap(coords);
+                        const coords = {
+                            lat: position.coords.latitude,
+                            lng: position.coords.longitude
+                        };
+                        initMapWithLocation(coords);
                     },
                     () => {
-                        // Geolocation failed, use default location
                         aiTextElement.textContent = "Could not get your location. Showing default map.";
-                        initializeMap(initialCoords);
+                        initMapWithLocation(initialCoords);
                     }
                 );
             } else {
-                // Browser doesn't support Geolocation, use default location
-                aiTextElement.textContent = "Geolocation is not supported by your browser.";
-                initializeMap(initialCoords);
+                aiTextElement.textContent = "Geolocation is not supported. Showing default map.";
+                initMapWithLocation(initialCoords);
             }
         }
         
-        // --- Geocoding Simulation ---
-        // In a real app, this would be an API call to a geocoding service.
-        const knownDestinations = {
-            "kirstenbosch gardens": { lat: -33.9879, lng: 18.4323 },
-            "v&a waterfront": { lat: -33.9036, lng: 18.4206 },
-            "table mountain": { lat: -33.9626, lng: 18.4098 },
-            "cape town stadium": { lat: -33.9067, lng: 18.4103 }
-        };
-
-        function geocodeDestination(name) {
-            const key = name.trim().toLowerCase();
-            return knownDestinations[key] || null;
-        }
-
-
-        // --- Navigation and Map Functions ---
-        function fetchRoute(start, end) {
-            console.log("Fetching route from", start, "to", end);
-            
-            // In a real app, you would use a routing service like OSRM, Mapbox, or Google Directions API.
-            // For this prototype, we'll draw a straight mock line.
-            const mockRoute = [
-                [start.lat, start.lng],
-                [end.lat, end.lng]
-            ];
-            
-            // Clear previous route if it exists
-            if (routePolyline) {
-                map.removeLayer(routePolyline);
-            }
-            if (destinationMarker) {
-                map.removeLayer(destinationMarker);
+        // --- Navigation and Routing ---
+        function calculateAndDisplayRoute(destination) {
+            if (!userLocation) {
+                aiTextElement.textContent = "I can't calculate a route without your location.";
+                return;
             }
 
-            // Add new destination and route
-            destinationMarker = L.marker([end.lat, end.lng]).addTo(map).bindPopup('Destination');
-            routePolyline = L.polyline(mockRoute, {color: '#007BFF'}).addTo(map);
-
-            // Fit map to the new route
-            map.fitBounds(routePolyline.getBounds(), { padding: [50, 50] });
+            directionsService.route({
+                origin: userLocation,
+                destination: destination,
+                travelMode: google.maps.TravelMode.DRIVING
+            })
+            .then((response) => {
+                directionsRenderer.setDirections(response);
+                // Clear the initial user marker as the route has its own start marker
+                if (userMarker) userMarker.setMap(null);
+                const routeInfo = response.routes[0].legs[0];
+                aiTextElement.textContent = `Route to ${routeInfo.end_address}. Duration: ${routeInfo.duration.text}.`;
+            })
+            .catch((e) => {
+                window.alert("Directions request failed due to " + e);
+                aiTextElement.textContent = "Sorry, I could not calculate a route for that destination.";
+            });
         }
         
         // --- Voice Interaction Logic ---
@@ -244,28 +200,61 @@
                 const destinationName = command.substring("drive to".length).trim();
                 aiTextElement.textContent = `Searching for "${destinationName}"...`;
                 
-                const destinationCoords = geocodeDestination(destinationName);
-                
-                if (destinationCoords) {
-                    aiTextElement.textContent = `Great! Setting a course for ${destinationName}.`;
-                    if (userLocation) {
-                        fetchRoute(userLocation, destinationCoords);
+                // Use Geocoder to find coordinates for the destination name
+                geocoder.geocode({ 'address': destinationName })
+                .then(({ results }) => {
+                    if (results[0]) {
+                        calculateAndDisplayRoute(results[0].geometry.location);
                     } else {
-                        aiTextElement.textContent = "I can't set a route without your current location.";
+                        window.alert("No results found for " + destinationName);
+                        aiTextElement.textContent = `Sorry, I couldn't find a location called "${destinationName}".`;
                     }
-                } else {
-                    aiTextElement.textContent = `Sorry, I couldn't find a location called "${destinationName}". Please try another.`;
-                }
+                })
+                .catch((e) => {
+                    window.alert("Geocoder failed due to: " + e);
+                    aiTextElement.textContent = "There was an error finding that location.";
+                });
+
             } else {
                 aiTextElement.textContent = `I heard: "${command}". Try saying "Drive to Table Mountain."`;
             }
         }
+        
+        // --- Web Speech API Setup ---
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.lang = 'en-US';
+
+            recognition.onresult = (event) => {
+                const command = event.results[0][0].transcript;
+                processUserCommand(command);
+            };
+
+            recognition.onspeechend = () => {
+                recognition.stop();
+                isListening = false;
+                micButton.classList.remove('active');
+                micLabel.textContent = 'Tap to Speak';
+            };
+            
+            recognition.onerror = (event) => {
+                aiTextElement.textContent = 'Error with voice recognition: ' + event.error;
+                isListening = false;
+                micButton.classList.remove('active');
+                micLabel.textContent = 'Tap to Speak';
+            };
+
+        } else {
+            micButton.disabled = true;
+            micLabel.textContent = "Voice not supported";
+            aiTextElement.textContent = "Sorry, your browser doesn't support voice commands.";
+        }
 
         micButton.addEventListener('click', () => {
-            if (!SpeechRecognition) {
-                return; // Speech recognition not supported
-            }
-
+            if (!SpeechRecognition) return;
             if (isListening) {
                 recognition.stop();
             } else {
@@ -276,15 +265,13 @@
                     micLabel.textContent = 'Listening...';
                     aiTextElement.textContent = "I'm listening... Speak now.";
                 } catch(e) {
-                    console.error("Could not start recognition:", e);
                     aiTextElement.textContent = "Could not start voice recognition.";
                 }
             }
         });
 
-        // --- Initial Load ---
-        document.addEventListener('DOMContentLoaded', getLocation);
-
     </script>
+    <!-- IMPORTANT: Replace YOUR_Maps_API_KEY with your actual API key -->
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCzgXyF0StCO_G64eG75LuZugiec0vbzoo&callback=getLocation"></script>
 </body>
 </html>
