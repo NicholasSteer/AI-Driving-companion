@@ -157,7 +157,7 @@
                     { enableHighAccuracy: true }
                 );
             } else {
-                speak("Geolocation is not supported.");
+                speak("Geolocation is not supported by this browser.");
                 initMapWithLocation(initialCoords);
             }
         }
@@ -190,7 +190,7 @@
                     strokeWeight: 2,
                 },
             });
-            speak("Your location is set. Where would you like to go?");
+            speak("Your location is set. Tap the microphone and tell me where you want to go.");
             startWatchingLocation();
         }
 
@@ -297,9 +297,13 @@
         }
         
         function handleLocationShare(command) {
+             if (!userLocation) {
+                speak("I can't share your location because I don't know where you are. Please ensure location services are active.");
+                return;
+            }
             const phoneNumberMatch = command.match(/\d+/g);
-            if (!phoneNumberMatch || !userLocation) {
-                speak("Please say a phone number and make sure location is active to share.");
+            if (!phoneNumberMatch) {
+                speak("I couldn't detect a phone number in your request. Please try again and say the full number clearly, for example: 'Share my location with 0821234567'.");
                 return;
             }
             const phoneNumber = phoneNumberMatch.join("");
@@ -307,7 +311,7 @@
             const message = encodeURIComponent(`Hi! I'm sharing my current location with you: ${mapsLink}`);
             const whatsappUrl = `https://wa.me/${phoneNumber}?text=${message}`;
 
-            speak(`Okay, I'm opening WhatsApp to share your location with ${phoneNumber}.`);
+            speak(`Okay, I'm opening WhatsApp to share your location with ${phoneNumber}. You'll need to press send.`);
             window.open(whatsappUrl, '_blank');
         }
 
