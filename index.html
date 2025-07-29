@@ -1,1 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI GPS Companion Prototype</title>
+    
+    <!-- LeafletJS for Maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <style>
+        /* Basic Reset */
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden; /* Prevent scrolling */
+        }
+
+        /* Map Container */
+        #map {
+            width: 100%;
+            height: 100%;
+            background-color: #f0f0f0;
+        }
+        
+        /* AI Companion Interface */
+        .ai-container {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 35%;
+            min-height: 200px;
+            background-color: rgba(255, 255, 255, 0.95);
+            border-top-left-radius: 20px;
+            border-top-right-radius: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            box-sizing: border-box;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease-in-out;
+        }
+
+        .ai-response-box {
+            flex-grow: 1;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .ai-text {
+            font-size: 18px;
+            color: #333;
+            text-align: center;
+        }
+
+        .mic-button {
+            background-color: #007BFF;
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 10px;
+            border: 4px solid rgba(0, 123, 255, 0.3);
+            cursor: pointer;
+            transition: background-color 0.3s, border-color 0.3s;
+        }
+        
+        .mic-button.active {
+            background-color: #E84A5F;
+            border-color: rgba(232, 74, 95, 0.3);
+        }
+
+        .mic-button i {
+            font-size: 28px;
+            color: white;
+        }
+
+        .mic-label {
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div class="ai-container">
+        <div class="ai-response-box">
+            <p id="ai-text">Hello! Where would you like to go today?</p>
+        </div>
+        <button id="mic-btn" class="mic-button">
+            <i class="fa-solid fa-microphone"></i>
+        </button>
+        <p id="mic-label" class="mic-label">Tap to Speak</p>
+    </div>
+
+    <script>
+        // --- DOM Elements ---
+        const aiTextElement = document.getElementById('ai-text');
+        const micButton = document.getElementById('mic-btn');
+        const micLabel = document.getElementById('mic-label');
+
+        // --- State Variables ---
+        let map;
+        let userMarker;
+        let destinationMarker;
+        let routePolyline;
+        let isListening = false;
+        let userLocation = null;
+        
+        // Initial location: Cape Town, South Africa
+        const initialCoords = [-33.9249, 18.4241];
+
+        // --- Map Initialization ---
+        function initializeMap(coords) {
+            map = L.map('map').setView(coords, 13);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+            
+            userLocation = { lat: coords[0], lng: coords[1] };
+            userMarker = L.marker(coords).addTo(map).bindPopup('You are here.');
+        }
+
+        // --- Location Tracking ---
+        function getLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const coords = [position.coords.latitude, position.coords.longitude];
+                        initializeMap(coords);
+                    },
+                    () => {
+                        // Geolocation failed, use default location
+                        aiTextElement.textContent = "Could not get your location. Showing default map.";
+                        initializeMap(initialCoords);
+                    }
+                );
+            } else {
+                // Browser doesn't support Geolocation, use default location
+                aiTextElement.textContent = "Geolocation is not supported by your browser.";
+                initializeMap(initialCoords);
+            }
+        }
+
+        // --- Navigation and Map Functions ---
+        function fetchRoute(start, end) {
+            console.log("Fetching route from", start, "to", end);
+            
+            // In a real app, you would use a routing service like OSRM, Mapbox, or Google Directions API.
+            // For this prototype, we'll draw a straight mock line.
+            const mockRoute = [
+                [start.lat, start.lng],
+                [end.lat, end.lng]
+            ];
+            
+            // Clear previous route if it exists
+            if (routePolyline) {
+                map.removeLayer(routePolyline);
+            }
+            if (destinationMarker) {
+                map.removeLayer(destinationMarker);
+            }
+
+            // Add new destination and route
+            destinationMarker = L.marker([end.lat, end.lng]).addTo(map).bindPopup('Destination');
+            routePolyline = L.polyline(mockRoute, {color: '#007BFF'}).addTo(map);
+
+            // Fit map to the new route
+            map.fitBounds(routePolyline.getBounds(), { padding: [50, 50] });
+        }
+        
+        // --- Voice Interaction Simulation ---
+        function processUserCommand(command) {
+            if (command.toLowerCase().includes("drive to")) {
+                aiTextElement.textContent = "Great! Setting a course for Kirstenbosch Gardens. Along the way, we can chat or I can tell you about the area.";
+                
+                // In a real app, you'd geocode "Kirstenbosch Gardens" to get coordinates.
+                const kirstenboschCoords = { lat: -33.9879, lng: 18.4323 };
+                
+                if (userLocation) {
+                    fetchRoute(userLocation, kirstenboschCoords);
+                } else {
+                    aiTextElement.textContent = "I can't set a route without your current location.";
+                }
+            } else {
+                aiTextElement.textContent = "I didn't quite catch that. Could you please repeat?";
+            }
+        }
+
+        micButton.addEventListener('click', () => {
+            isListening = !isListening;
+            if (isListening) {
+                micButton.classList.add('active');
+                micLabel.textContent = 'Listening...';
+                aiTextElement.textContent = "I'm listening...";
+
+                // Simulate listening and processing a command
+                setTimeout(() => {
+                    const userCommand = "Let's drive to Kirstenbosch Gardens.";
+                    console.log("User said: ", userCommand);
+                    processUserCommand(userCommand);
+                    isListening = false;
+                    micButton.classList.remove('active');
+                    micLabel.textContent = 'Tap to Speak';
+                }, 3000);
+
+            } else {
+                // Logic to stop listening early could go here
+                micButton.classList.remove('active');
+                micLabel.textContent = 'Tap to Speak';
+            }
+        });
+
+        // --- Initial Load ---
+        document.addEventListener('DOMContentLoaded', getLocation);
+
+    </script>
+</body>
+</html>
