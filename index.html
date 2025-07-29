@@ -126,6 +126,44 @@
         // Initial location: Cape Town, South Africa
         const initialCoords = [-33.9249, 18.4241];
 
+        // --- Web Speech API for Voice Recognition ---
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false; // Stop listening after a single phrase
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+
+            // Fired when a command is successfully recognized
+            recognition.onresult = (event) => {
+                const command = event.results[0][0].transcript;
+                console.log('User said: ', command);
+                processUserCommand(command);
+            };
+
+            // Fired when the user stops talking
+            recognition.onspeechend = () => {
+                recognition.stop();
+                isListening = false;
+                micButton.classList.remove('active');
+                micLabel.textContent = 'Tap to Speak';
+            };
+            
+            // Fired on a recognition error
+            recognition.onerror = (event) => {
+                aiTextElement.textContent = 'Error with voice recognition: ' + event.error;
+                isListening = false;
+                micButton.classList.remove('active');
+                micLabel.textContent = 'Tap to Speak';
+            };
+
+        } else {
+            aiTextElement.textContent = "Sorry, your browser doesn't support voice commands.";
+        }
+
+
         // --- Map Initialization ---
         function initializeMap(coords) {
             map = L.map('map').setView(coords, 13);
@@ -157,6 +195,21 @@
                 initializeMap(initialCoords);
             }
         }
+        
+        // --- Geocoding Simulation ---
+        // In a real app, this would be an API call to a geocoding service.
+        const knownDestinations = {
+            "kirstenbosch gardens": { lat: -33.9879, lng: 18.4323 },
+            "v&a waterfront": { lat: -33.9036, lng: 18.4206 },
+            "table mountain": { lat: -33.9626, lng: 18.4098 },
+            "cape town stadium": { lat: -33.9067, lng: 18.4103 }
+        };
+
+        function geocodeDestination(name) {
+            const key = name.trim().toLowerCase();
+            return knownDestinations[key] || null;
+        }
+
 
         // --- Navigation and Map Functions ---
         function fetchRoute(start, end) {
@@ -185,45 +238,47 @@
             map.fitBounds(routePolyline.getBounds(), { padding: [50, 50] });
         }
         
-        // --- Voice Interaction Simulation ---
+        // --- Voice Interaction Logic ---
         function processUserCommand(command) {
-            if (command.toLowerCase().includes("drive to")) {
-                aiTextElement.textContent = "Great! Setting a course for Kirstenbosch Gardens. Along the way, we can chat or I can tell you about the area.";
+            if (command.toLowerCase().startsWith("drive to")) {
+                const destinationName = command.substring("drive to".length).trim();
+                aiTextElement.textContent = `Searching for "${destinationName}"...`;
                 
-                // In a real app, you'd geocode "Kirstenbosch Gardens" to get coordinates.
-                const kirstenboschCoords = { lat: -33.9879, lng: 18.4323 };
+                const destinationCoords = geocodeDestination(destinationName);
                 
-                if (userLocation) {
-                    fetchRoute(userLocation, kirstenboschCoords);
+                if (destinationCoords) {
+                    aiTextElement.textContent = `Great! Setting a course for ${destinationName}.`;
+                    if (userLocation) {
+                        fetchRoute(userLocation, destinationCoords);
+                    } else {
+                        aiTextElement.textContent = "I can't set a route without your current location.";
+                    }
                 } else {
-                    aiTextElement.textContent = "I can't set a route without your current location.";
+                    aiTextElement.textContent = `Sorry, I couldn't find a location called "${destinationName}". Please try another.`;
                 }
             } else {
-                aiTextElement.textContent = "I didn't quite catch that. Could you please repeat?";
+                aiTextElement.textContent = `I heard: "${command}". Try saying "Drive to Table Mountain."`;
             }
         }
 
         micButton.addEventListener('click', () => {
-            isListening = !isListening;
+            if (!SpeechRecognition) {
+                return; // Speech recognition not supported
+            }
+
             if (isListening) {
-                micButton.classList.add('active');
-                micLabel.textContent = 'Listening...';
-                aiTextElement.textContent = "I'm listening...";
-
-                // Simulate listening and processing a command
-                setTimeout(() => {
-                    const userCommand = "Let's drive to Kirstenbosch Gardens.";
-                    console.log("User said: ", userCommand);
-                    processUserCommand(userCommand);
-                    isListening = false;
-                    micButton.classList.remove('active');
-                    micLabel.textContent = 'Tap to Speak';
-                }, 3000);
-
+                recognition.stop();
             } else {
-                // Logic to stop listening early could go here
-                micButton.classList.remove('active');
-                micLabel.textContent = 'Tap to Speak';
+                try {
+                    recognition.start();
+                    isListening = true;
+                    micButton.classList.add('active');
+                    micLabel.textContent = 'Listening...';
+                    aiTextElement.textContent = "I'm listening... Speak now.";
+                } catch(e) {
+                    console.error("Could not start recognition:", e);
+                    aiTextElement.textContent = "Could not start voice recognition.";
+                }
             }
         });
 
