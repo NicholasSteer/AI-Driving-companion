@@ -212,9 +212,17 @@
                 },
                 (error) => {
                     console.error("Error watching position: ", error);
-                    let errorMessage = "I'm having trouble tracking your live location. Please check your device's settings and permissions.";
-                    if (error.code === error.TIMEOUT) {
-                        errorMessage = "Could not get your location in time. Please try again in an area with a clearer signal.";
+                    let errorMessage = "An unknown error occurred while tracking your location.";
+                    switch(error.code) {
+                        case error.PERMISSION_DENIED:
+                            errorMessage = "Location access was denied. Please enable it in your browser settings to use live tracking.";
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            errorMessage = "Your location information is currently unavailable. Please check your connection or move to an area with a clearer signal.";
+                            break;
+                        case error.TIMEOUT:
+                            errorMessage = "Could not get your location in time. Please try again later.";
+                            break;
                     }
                     speak(errorMessage);
                     if (locationWatcherId) {
