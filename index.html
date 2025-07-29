@@ -123,6 +123,26 @@
         // Initial location: Cape Town, South Africa
         const initialCoords = { lat: -33.9249, lng: 18.4241 };
 
+        // --- Text-to-Speech (TTS) Setup ---
+        const synth = window.speechSynthesis;
+        
+        function speak(text) {
+            if (synth.speaking) {
+                console.error('SpeechSynthesis.speaking');
+                return;
+            }
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.onend = () => {
+                console.log('SpeechSynthesisUtterance.onend');
+            };
+            utterance.onerror = (event) => {
+                console.error('SpeechSynthesisUtterance.onerror', event);
+            };
+            aiTextElement.textContent = text;
+            synth.speak(utterance);
+        }
+
+
         // --- Google Maps Initialization ---
         function initMapWithLocation(coords) {
             map = new google.maps.Map(document.getElementById('map'), {
@@ -132,19 +152,26 @@
                 streetViewControl: false,
             });
 
-            // Initialize Google Maps services
             directionsService = new google.maps.DirectionsService();
             directionsRenderer = new google.maps.DirectionsRenderer();
             geocoder = new google.maps.Geocoder();
-            directionsRenderer.setMap(map); // Link renderer to the map
+            directionsRenderer.setMap(map); 
 
             userLocation = coords;
             userMarker = new google.maps.Marker({
                 position: coords,
                 map: map,
                 title: "You are here!",
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 7,
+                    fillColor: "#4285F4",
+                    fillOpacity: 1,
+                    strokeColor: "white",
+                    strokeWeight: 2,
+                },
             });
-            aiTextElement.textContent = "Your location is set. Where would you like to go?";
+            speak("Your location is set. Where would you like to go?");
         }
 
         // --- Location Tracking ---
@@ -159,12 +186,12 @@
                         initMapWithLocation(coords);
                     },
                     () => {
-                        aiTextElement.textContent = "Could not get your location. Showing default map.";
+                        speak("Could not get your location. Showing default map.");
                         initMapWithLocation(initialCoords);
                     }
                 );
             } else {
-                aiTextElement.textContent = "Geolocation is not supported. Showing default map.";
+                speak("Geolocation is not supported. Showing default map.");
                 initMapWithLocation(initialCoords);
             }
         }
@@ -172,7 +199,7 @@
         // --- Navigation and Routing ---
         function calculateAndDisplayRoute(destination) {
             if (!userLocation) {
-                aiTextElement.textContent = "I can't calculate a route without your location.";
+                speak("I can't calculate a route without your location.");
                 return;
             }
 
@@ -183,40 +210,58 @@
             })
             .then((response) => {
                 directionsRenderer.setDirections(response);
-                // Clear the initial user marker as the route has its own start marker
                 if (userMarker) userMarker.setMap(null);
                 const routeInfo = response.routes[0].legs[0];
-                aiTextElement.textContent = `Route to ${routeInfo.end_address}. Duration: ${routeInfo.duration.text}.`;
+                const firstStep = routeInfo.steps[0].instructions.replace(/<[^>]*>/g, ""); // Clean HTML tags
+                
+                speak(`Starting route to ${routeInfo.end_address}. Your first instruction is: ${firstStep}`);
+                
+                // --- Proactive Conversation ---
+                // In a real app, this would be more intelligent.
+                setTimeout(() => {
+                    speak("By the way, if you get bored on the drive, just ask me for a fun fact or a joke.");
+                }, 10000); // Start a conversation after 10 seconds.
             })
             .catch((e) => {
-                window.alert("Directions request failed due to " + e);
-                aiTextElement.textContent = "Sorry, I could not calculate a route for that destination.";
+                speak("Sorry, I could not calculate a route for that destination.");
             });
         }
         
         // --- Voice Interaction Logic ---
+        function handleConversation(command) {
+            // This is where you would call a real AI like Gemini.
+            // For this prototype, we'll use simple hardcoded responses.
+            const lowerCaseCommand = command.toLowerCase();
+
+            if (lowerCaseCommand.includes("fun fact")) {
+                speak("Did you know that the heart of a blue whale is so big, a human can swim through its arteries?");
+            } else if (lowerCaseCommand.includes("joke")) {
+                speak("Why don't scientists trust atoms? Because they make up everything!");
+            } else {
+                speak(`I'm not sure how to respond to that, but it's nice to chat!`);
+            }
+        }
+        
         function processUserCommand(command) {
             if (command.toLowerCase().startsWith("drive to")) {
                 const destinationName = command.substring("drive to".length).trim();
-                aiTextElement.textContent = `Searching for "${destinationName}"...`;
+                speak(`Searching for ${destinationName}`);
                 
-                // Use Geocoder to find coordinates for the destination name
                 geocoder.geocode({ 'address': destinationName })
                 .then(({ results }) => {
                     if (results[0]) {
                         calculateAndDisplayRoute(results[0].geometry.location);
                     } else {
-                        window.alert("No results found for " + destinationName);
-                        aiTextElement.textContent = `Sorry, I couldn't find a location called "${destinationName}".`;
+                        speak(`Sorry, I couldn't find a location called "${destinationName}".`);
                     }
                 })
                 .catch((e) => {
-                    window.alert("Geocoder failed due to: " + e);
-                    aiTextElement.textContent = "There was an error finding that location.";
+                    speak("There was an error finding that location.");
                 });
 
             } else {
-                aiTextElement.textContent = `I heard: "${command}". Try saying "Drive to Table Mountain."`;
+                // If it's not a navigation command, treat it as conversation
+                handleConversation(command);
             }
         }
         
@@ -241,7 +286,9 @@
             };
             
             recognition.onerror = (event) => {
-                aiTextElement.textContent = 'Error with voice recognition: ' + event.error;
+                if(event.error !== 'no-speech') {
+                   speak('Sorry, there was a voice recognition error.');
+                }
                 isListening = false;
                 micButton.classList.remove('active');
                 micLabel.textContent = 'Tap to Speak';
@@ -250,7 +297,6 @@
         } else {
             micButton.disabled = true;
             micLabel.textContent = "Voice not supported";
-            aiTextElement.textContent = "Sorry, your browser doesn't support voice commands.";
         }
 
         micButton.addEventListener('click', () => {
@@ -259,11 +305,13 @@
                 recognition.stop();
             } else {
                 try {
+                    // Stop any current speech before listening
+                    synth.cancel(); 
                     recognition.start();
                     isListening = true;
                     micButton.classList.add('active');
                     micLabel.textContent = 'Listening...';
-                    aiTextElement.textContent = "I'm listening... Speak now.";
+                    aiTextElement.textContent = "I'm listening...";
                 } catch(e) {
                     aiTextElement.textContent = "Could not start voice recognition.";
                 }
@@ -272,6 +320,6 @@
 
     </script>
     <!-- IMPORTANT: Replace YOUR_Maps_API_KEY with your actual API key -->
-    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCzgXyF0StCO_G64eG75LuZugiec0vbzoo&callback=getLocation"></script>
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=YOUR_Maps_API_KEY&callback=getLocation"></script>
 </body>
 </html>
