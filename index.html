@@ -106,6 +106,10 @@
     </div>
 
     <script>
+        // --- API Keys ---
+        const GEMINI_API_KEY = "AIzaSyDa2G1Bq7jWg34Ox25bWfN5Tn2dbtU4G4Y"; // IMPORTANT: Add your Gemini API key here
+        const Maps_API_KEY = "AIzaSyCzgXyF0StCO_G64eG75LuZugiec0vbzoo"; // IMPORTANT: Add your Google Maps API key here
+
         // --- DOM Elements ---
         const aiTextElement = document.getElementById('ai-text');
         const micButton = document.getElementById('mic-btn');
@@ -119,8 +123,8 @@
         let directionsService;
         let directionsRenderer;
         let geocoder;
+        let locationWatcherId;
         
-        // Initial location: Cape Town, South Africa
         const initialCoords = { lat: -33.9249, lng: 18.4241 };
 
         // --- Text-to-Speech (TTS) Setup ---
@@ -128,26 +132,40 @@
         
         function speak(text) {
             if (synth.speaking) {
-                console.error('SpeechSynthesis.speaking');
-                return;
+                synth.cancel();
             }
             const utterance = new SpeechSynthesisUtterance(text);
-            utterance.onend = () => {
-                console.log('SpeechSynthesisUtterance.onend');
-            };
-            utterance.onerror = (event) => {
-                console.error('SpeechSynthesisUtterance.onerror', event);
-            };
             aiTextElement.textContent = text;
             synth.speak(utterance);
         }
 
-
         // --- Google Maps Initialization ---
+        // This function is now a global callback accessible by the Google Maps script
+        window.getLocation = function() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        initMapWithLocation({
+                            lat: position.coords.latitude,
+                            lng: position.coords.longitude
+                        });
+                    },
+                    () => {
+                        speak("Could not get your location. Using default.");
+                        initMapWithLocation(initialCoords);
+                    },
+                    { enableHighAccuracy: true }
+                );
+            } else {
+                speak("Geolocation is not supported.");
+                initMapWithLocation(initialCoords);
+            }
+        }
+
         function initMapWithLocation(coords) {
             map = new google.maps.Map(document.getElementById('map'), {
                 center: coords,
-                zoom: 14,
+                zoom: 16,
                 mapTypeControl: false,
                 streetViewControl: false,
             });
@@ -163,8 +181,9 @@
                 map: map,
                 title: "You are here!",
                 icon: {
-                    path: google.maps.SymbolPath.CIRCLE,
+                    path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
                     scale: 7,
+                    rotation: 0,
                     fillColor: "#4285F4",
                     fillOpacity: 1,
                     strokeColor: "white",
@@ -172,28 +191,42 @@
                 },
             });
             speak("Your location is set. Where would you like to go?");
+            startWatchingLocation();
         }
 
-        // --- Location Tracking ---
-        function getLocation() {
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(
-                    (position) => {
-                        const coords = {
-                            lat: position.coords.latitude,
-                            lng: position.coords.longitude
-                        };
-                        initMapWithLocation(coords);
-                    },
-                    () => {
-                        speak("Could not get your location. Showing default map.");
-                        initMapWithLocation(initialCoords);
-                    }
-                );
-            } else {
-                speak("Geolocation is not supported. Showing default map.");
-                initMapWithLocation(initialCoords);
+        // --- Real-Time Location Tracking ---
+        function startWatchingLocation() {
+            if (locationWatcherId) {
+                navigator.geolocation.clearWatch(locationWatcherId);
             }
+            locationWatcherId = navigator.geolocation.watchPosition(
+                (position) => {
+                    userLocation = {
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude
+                    };
+                    if (userMarker) {
+                        userMarker.setPosition(userLocation);
+                        map.panTo(userLocation);
+                    }
+                },
+                (error) => {
+                    console.error("Error watching position: ", error);
+                    let errorMessage = "I'm having trouble tracking your live location. Please check your device's settings and permissions.";
+                    if (error.code === error.TIMEOUT) {
+                        errorMessage = "Could not get your location in time. Please try again in an area with a clearer signal.";
+                    }
+                    speak(errorMessage);
+                    if (locationWatcherId) {
+                       navigator.geolocation.clearWatch(locationWatcherId);
+                    }
+                },
+                {
+                    enableHighAccuracy: true,
+                    maximumAge: 0,
+                    timeout: 10000,
+                }
+            );
         }
         
         // --- Navigation and Routing ---
@@ -202,6 +235,7 @@
                 speak("I can't calculate a route without your location.");
                 return;
             }
+            if (userMarker) userMarker.setMap(null);
 
             directionsService.route({
                 origin: userLocation,
@@ -210,57 +244,81 @@
             })
             .then((response) => {
                 directionsRenderer.setDirections(response);
-                if (userMarker) userMarker.setMap(null);
                 const routeInfo = response.routes[0].legs[0];
-                const firstStep = routeInfo.steps[0].instructions.replace(/<[^>]*>/g, ""); // Clean HTML tags
-                
+                const firstStep = routeInfo.steps[0].instructions.replace(/<[^>]*>/g, "");
                 speak(`Starting route to ${routeInfo.end_address}. Your first instruction is: ${firstStep}`);
                 
-                // --- Proactive Conversation ---
-                // In a real app, this would be more intelligent.
                 setTimeout(() => {
-                    speak("By the way, if you get bored on the drive, just ask me for a fun fact or a joke.");
-                }, 10000); // Start a conversation after 10 seconds.
+                    handleConversation("Give me a friendly greeting for the start of my drive.");
+                }, 10000);
             })
             .catch((e) => {
                 speak("Sorry, I could not calculate a route for that destination.");
+                if(userMarker) userMarker.setMap(map);
             });
         }
         
         // --- Voice Interaction Logic ---
-        function handleConversation(command) {
-            // This is where you would call a real AI like Gemini.
-            // For this prototype, we'll use simple hardcoded responses.
-            const lowerCaseCommand = command.toLowerCase();
+        async function handleConversation(command) {
+            if (!GEMINI_API_KEY) {
+                speak("The AI companion is not configured. An API key is needed.");
+                return;
+            }
+            speak("Thinking...");
+            
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${GEMINI_API_KEY}`;
+            const payload = {
+                contents: [{
+                    parts: [{ "text": `You are a friendly and helpful AI driving companion. Keep your answers concise and cheerful. User says: "${command}"` }]
+                }]
+            };
 
-            if (lowerCaseCommand.includes("fun fact")) {
-                speak("Did you know that the heart of a blue whale is so big, a human can swim through its arteries?");
-            } else if (lowerCaseCommand.includes("joke")) {
-                speak("Why don't scientists trust atoms? Because they make up everything!");
-            } else {
-                speak(`I'm not sure how to respond to that, but it's nice to chat!`);
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+                const text = result.candidates[0].content.parts[0].text;
+                speak(text);
+            } catch (error) {
+                console.error("Gemini API error:", error);
+                speak("I'm having a little trouble thinking right now. Please try again later.");
             }
         }
         
-        function processUserCommand(command) {
-            if (command.toLowerCase().startsWith("drive to")) {
-                const destinationName = command.substring("drive to".length).trim();
-                speak(`Searching for ${destinationName}`);
-                
-                geocoder.geocode({ 'address': destinationName })
-                .then(({ results }) => {
-                    if (results[0]) {
-                        calculateAndDisplayRoute(results[0].geometry.location);
-                    } else {
-                        speak(`Sorry, I couldn't find a location called "${destinationName}".`);
-                    }
-                })
-                .catch((e) => {
-                    speak("There was an error finding that location.");
-                });
+        function handleLocationShare(command) {
+            const phoneNumberMatch = command.match(/\d+/g);
+            if (!phoneNumberMatch || !userLocation) {
+                speak("Please say a phone number and make sure location is active to share.");
+                return;
+            }
+            const phoneNumber = phoneNumberMatch.join("");
+            const mapsLink = `https://www.google.com/maps?q=${userLocation.lat},${userLocation.lng}`;
+            const message = encodeURIComponent(`Hi! I'm sharing my current location with you: ${mapsLink}`);
+            const whatsappUrl = `https://wa.me/${phoneNumber}?text=${message}`;
 
+            speak(`Okay, I'm opening WhatsApp to share your location with ${phoneNumber}.`);
+            window.open(whatsappUrl, '_blank');
+        }
+
+        function processUserCommand(command) {
+            const lowerCaseCommand = command.toLowerCase();
+            if (lowerCaseCommand.startsWith("drive to") || lowerCaseCommand.startsWith("navigate to")) {
+                const destinationName = command.replace(/^(drive to|navigate to)\s*/i, '').trim();
+                speak(`Searching for ${destinationName}`);
+                geocoder.geocode({ 'address': destinationName })
+                    .then(({ results }) => {
+                        if (results[0]) {
+                            calculateAndDisplayRoute(results[0].geometry.location);
+                        } else {
+                            speak(`Sorry, I couldn't find a location called "${destinationName}".`);
+                        }
+                    }).catch(() => speak("There was an error finding that location."));
+            } else if (lowerCaseCommand.startsWith("share my location with")) {
+                handleLocationShare(command);
             } else {
-                // If it's not a navigation command, treat it as conversation
                 handleConversation(command);
             }
         }
@@ -279,7 +337,6 @@
             };
 
             recognition.onspeechend = () => {
-                recognition.stop();
                 isListening = false;
                 micButton.classList.remove('active');
                 micLabel.textContent = 'Tap to Speak';
@@ -287,13 +344,12 @@
             
             recognition.onerror = (event) => {
                 if(event.error !== 'no-speech') {
-                   speak('Sorry, there was a voice recognition error.');
+                   speak('Sorry, a voice recognition error occurred.');
                 }
                 isListening = false;
                 micButton.classList.remove('active');
                 micLabel.textContent = 'Tap to Speak';
             };
-
         } else {
             micButton.disabled = true;
             micLabel.textContent = "Voice not supported";
@@ -305,7 +361,6 @@
                 recognition.stop();
             } else {
                 try {
-                    // Stop any current speech before listening
                     synth.cancel(); 
                     recognition.start();
                     isListening = true;
@@ -318,8 +373,22 @@
             }
         });
 
+        // --- Dynamically Load Google Maps Script ---
+        function loadGoogleMapsScript() {
+            if (!Maps_API_KEY) {
+                speak("Google Maps API key is missing. The map cannot be loaded.");
+                return;
+            }
+            const script = document.createElement('script');
+            script.src = `https://maps.googleapis.com/maps/api/js?key=${Maps_API_KEY}&callback=getLocation`;
+            script.async = true;
+            script.defer = true;
+            document.head.appendChild(script);
+        }
+
+        // Start the app
+        loadGoogleMapsScript();
+
     </script>
-    <!-- IMPORTANT: Replace YOUR_Maps_API_KEY with your actual API key -->
-    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCzgXyF0StCO_G64eG75LuZugiec0vbzoo&callback=getLocation"></script>
 </body>
 </html>
